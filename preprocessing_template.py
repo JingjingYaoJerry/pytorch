@@ -40,6 +40,19 @@ print(split_df)
 df.column = pd.to_numeric(split_df[1])
 
 #============ Data Missingness ============#
+# Type 1 - Structurally Missing Data: missed for a logical reason (e.g., not applicable)
+# One field is not applicable to a certain group; it is dependent on the value of another field
+# Type 2 - Missing Completely at Random (MCAR): missed with no logic, no outside force, or unseen behavior
+# One field is gone for no reason, probably due to a bug
+# Type 3 - Missing at Random (MAR): missed differently for different groups, but equally within a group
+# Some fields are missing (not reported) specifically for some groups due to certain concerns, but not for all values
+# Type 4 - Missing Not at Random (MNAR): missed for some logical reason for all data
+# Some fields are missing following a possible pattern
+
+# Checking small chunks first with df.head()
+# Checking the statistics with df.describe(); df.summary() 
+# Checking the columns' data types with df.dtypes
+
 # Count the number of missing values in each column 
 df.isna().sum() 
 
@@ -55,11 +68,23 @@ pd.crosstab(
         rownames = ['anoter_feature_name'], # names the rows
         colnames = ['feature_is_na']) # names the columns
 
-# Method 1: drop all rows with a missing value
+# Method 1 - Listwise Deletion: drop all rows with any missing value (only if there's not much missing data)
+df.dropna(inplace=True)
+# Method 2 - Pairwise Deletion: drop all rows with a missing value within specified columns
 df = df.dropna(subset=['na_in_column1', 'na_in_column2'])
-# Method 2: fill the missing values with the mean of the column, or with some other aggregate value
+# Method 3: fill the missing values with the mean of the column, or with some other aggregate value
 df.fillna(value={'column1':df.column1.mean(), 'column2':df.column2.mean()}, inplace=True)
-
+# Method 4 (only applicable for time series) - Single Imputation: fill a missing value with a value from another time
+        # Forward Fill - LOCF
+df['column_name1'].ffill(axis=0, inplace=True)
+        # Backward Fill - NOCB 
+df['column_name2'].bfill(axis=0, inplace=True)
+        # Baseline Fill - BOCF
+baseline = df['column_name3'].mean()  # or df['column_name3'][0], etc.
+df['column_name3'].fillna(value=baseline, inplace=True)
+        # Worst Fill - WOCF
+worst = df['column_name4'].min()  # or df['column_name4'].max(), etc.
+df['column_name4'].fillna(value=worst, inplace=True)
 
 # ==================== 2. Data Tidying ====================== #
 
