@@ -74,7 +74,14 @@ df.dropna(inplace=True)
 df = df.dropna(subset=['na_in_column1', 'na_in_column2'])
 # Method 3: fill the missing values with the mean of the column, or with some other aggregate value
 df.fillna(value={'column1':df.column1.mean(), 'column2':df.column2.mean()}, inplace=True)
-# Method 4 (only applicable for time series) - Single Imputation: fill a missing value with a value from another time
+# Method 4 (applicable for missingness across columns) - Multiple Imputation: fill multiple times with an algorithm so the best estimate is used
+from sklearn.experimental import enable_iterative_imputer
+from sklearn.impute import IterativeImputer
+imputer = IterativeImputer(max_iter=10, random_state=0)
+imputer.fit(df) # fit the imputer to predict the missing values
+df = pd.DataFrame(np.round(imputer.transform(df), 2), columns=df.columns) # image back to a DataFrame
+print(df.head())
+# Method 5 (only applicable for time series) - Single Imputation: fill a missing value with a value from another time
         # Forward Fill - LOCF
 df['column_name1'].ffill(axis=0, inplace=True)
         # Backward Fill - NOCB 
