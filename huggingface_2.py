@@ -145,9 +145,13 @@ def main():
 
     The corresponding helper function is invoked.
     """
-    # Shortcut: reuse a locally-saved checkpoint?
+    print("By default, any pre-trained Transformer models & tokenizers are saved under ~/.cache/huggingface/hub/.")
+    print(f"i.e., {pathlib.Path.home() / '.cache' / 'huggingface' / 'hub'}")
+    print("It will prevent re-downloading the same checkpoints, but you should still use the same method to load them.")
+    print("Hence, unless there were custom configs/params/etc. saved locally, pick 'N' here!")
     if yes("Load model/tokenizer from a local directory? (Y/N) "):
-        local_dir = input("Enter directory: ").strip()
+        local_dir = input("Enter directory (default ./saved): ").strip() \
+                   or "saved" # the default directory in the current folder
         if not pathlib.Path(local_dir).exists():
             print("Directory does not exist.")
             sys.exit(1)
@@ -462,8 +466,8 @@ def tokenizer_model_post_mode():
     if yes("Save this model/tokenizer locally? (Y/N) "):
         print("Two files are saved for the model -- config.json (attributes for the architecture) & pytorch_model.bin (state dict)")
         print("For the tokenizer, two files are saved for the algorithm and the vocabulary")
-        save_dir = input("Directory to save (default ./saved_model): ").strip() \
-                   or "saved_model" # the default directory in the current folder
+        save_dir = input("Directory to save (default ./saved): ").strip() \
+                   or "saved" # the default directory in the current folder
         save_to_dir(model, tokenizer, save_dir)
 
     maybe_push_to_hub(model, tokenizer)
