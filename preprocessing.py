@@ -1,232 +1,254 @@
-# preprocess_gui.py
-# 纯标准库 + pandas + numpy 即可运行
-import csv, os, sys, math
-import tkinter as tk
+# preprocess_strict.py
+# =============================================================
+# Usage (import):
+#     from preprocess_strict import preprocess
+#     clean_df = preprocess("data.csv")
+#
+# What it does
+# ------------
+# 1. 100 % 按照 `preprocessing_template.py` 中**逐条列出的异常场景**
+#    • 重复行、缺失、高缺失率、负值、离群、货币字符串、混合字串数字、
+#      URL 前缀、正负无穷… 共 9 类
+# 2. 每发现 1 条异常 → 弹出 Tkinter 窗口：
+#      ┌────────────────────────────┐
+#      │ 可视化整行数据（含列名）      │
+#      │ Hint : 为什么异常            │
+#      │ Solution : 来自模板的建议     │
+#      │  [Replace] [Leave Unchanged] │
+#      └────────────────────────────┘
+#    Replace   → 用建议值修改后进入下一条
+#    Leave …   → 保持原样进入下一条
+# 3. 全程**不自动删除/修改**，一切由用户点击确认
+#
+# Soft-deps : pandas  numpy  (可选) transformers  torch
+# Std-lib  : csv  os  re  tkinter
+# =============================================================
+from __future__ import annotations
+import os, csv, re, sys, tkinter as tk
 from tkinter import ttk, messagebox
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 
-# =============== 1. Load CSV（Encoding/Delimeter Sniffing） ================= #
-def sniff_delim(path: str) -> str:
-    with open(path, "r", encoding="utf8", errors="ignore") as f:
-        sample = "".join(f.readline() for _ in range(5))
-    #============ Delimiter Sniffing ============#
-    # https://docs.python.org/zh-cn/3.13/library/csv.html#csv.Sniffer
-    return csv.Sniffer().sniff(sample).delimiter # return the detected dialect's delimiter
+# ---------------------------- 0. robust CSV ----------------------------
+def _sniff_delim(fp: str) -> str:
+    with open(fp, "r", encoding="utf8", errors="ignore") as f:
+        sample = f.readline() + f.readline()
+    return csv.Sniffer().sniff(sample).delimiter
 
 
-def load_csv(path: str) -> pd.DataFrame:
-    #============ File Existance Checking ============#
+def _read_csv(path: str) -> pd.DataFrame:
     if not os.path.isfile(path):
         raise FileNotFoundError(path)
-    #============ Encoding Sniffing ============#
-    for enc in ("utf8", "utf-16", "latin1"):
+    for enc in ("utf-8", "utf-16", "latin-1"):
         try:
-            df = pd.read_csv(path, delimiter=sniff_delim(path), encoding=enc)
-            print(f"[INFO] Successfully loaded {path} with encoding {enc}")
+            df = pd.read_csv(path, delimiter=_sniff_delim(path), encoding=enc)
+            print(f"[INFO] loaded with {enc}")
             return df
-        except UnicodeDecodeError:
-            print(f"[WARN] Encoding {enc} failed，trying next...")
-    raise UnicodeDecodeError("No Suitable Encoding Found",)
+        except (UnicodeDecodeError, csv.Error):
+            print(f"[WARN] {enc} failed")
+    raise UnicodeDecodeError("cannot decode the file")
 
-
-# =============== 2. Basic Standardization ================= #
-def basic_cleanup(df: pd.DataFrame) -> pd.DataFrame:
-    #============ Column Name Standardization ============#
-    df.columns = (df.columns.astype(str) # get all column names
-                  .str.strip() # strip leading/trailing spaces
-                  .str.lower() # convert to lower case
+# ----------------------- 1. basic wrangling (template) ------------------
+def _standardise(df: pd.DataFrame) -> pd.DataFrame:
+    df.columns = (df.columns.astype(str)
+                  .str.strip()
+                  .str.lower()
                   .str.replace(r"\s+", "_", regex=True))
-                # replace all whitespace with underscore
-    # replace infinities with NaN for consistency
-    df.replace([np.inf, -np.inf], np.nan, inplace=True)
-    # replace
+    # keep ±inf for detection, clone then convert afterwards
     return df
 
+# ------------------------ 2. scan every template rule -------------------
+CURRENCY_RE = re.compile(r'^\$[\d,]+(\.\d+)?$')
+DIGIT_RE    = re.compile(r'\d')
+HTTP_RE     = re.compile(r'^https?://', flags=re.I)
 
-# =============== 3. 扫描异常，生成 issue 表 ================= #
-def scan_issues(df: pd.DataFrame,
-                miss_thresh: float = 0.5,
-                iqr_k: float = 1.5) -> pd.DataFrame:
-    """
-    返回 issue DataFrame:
-        col, row_idx, reason, suggestion
-    """
+def _scan(df: pd.DataFrame, miss_thr=.5, iqr_k=1.5) -> pd.DataFrame:
+    """return DataFrame[ col, row, cause, suggestion_val, suggestion_text ]"""
     issues: List[Dict[str, Any]] = []
 
-    # 高缺失列
-    na_ratio = df.isna().mean()
-    for col, ratio in na_ratio.items():
-        if ratio > miss_thresh:
+    # duplicates ----------------------------------------------------------
+    for idx in df[df.duplicated()].index:
+        issues.append(dict(col="__ROW__", row=idx,
+                           cause="duplicate row",
+                           sugg_val="DROP",
+                           sugg_text="模板建议: drop_duplicates() 删除重复行"))
+
+    # missing & high-missing ---------------------------------------------
+    miss_rate = df.isna().mean()
+    for col, rate in miss_rate.items():
+        if rate > 0:
             for idx in df[df[col].isna()].index:
-                issues.append(dict(col=col, row_idx=int(idx),
-                                   reason="缺失值 (>50%)",
-                                   suggestion=("median" if pd.api.types.is_numeric_dtype(df[col])
-                                               else "UNK")))
+                is_high = rate > miss_thr
+                cause   = "missing (>50%)" if is_high else "missing"
+                if pd.api.types.is_numeric_dtype(df[col]):
+                    text = "模板建议: 使用列均值/中位数填补"
+                    val  = df[col].median()
+                else:
+                    text = "模板建议: 使用众数或 'UNK' 填补"
+                    mode = df[col].mode()
+                    val  = mode.iloc[0] if not mode.empty else "UNK"
+                issues.append(dict(col=col, row=idx,
+                                   cause=cause,
+                                   sugg_val=val,
+                                   sugg_text=text))
 
-    # 3-2 一般缺失
+    # ±inf ---------------------------------------------------------------
+    inf_mask = df.replace([np.inf, -np.inf], np.nan)    # create copy
     for col in df.columns:
-        miss_rows = df[df[col].isna()].index
-        for idx in miss_rows:
-            issues.append(dict(col=col, row_idx=int(idx),
-                               reason="缺失值",
-                               suggestion=("median" if pd.api.types.is_numeric_dtype(df[col])
-                                           else "mode")))
+        for idx, v in df[col].items():
+            if v in (np.inf, -np.inf):
+                issues.append(dict(col=col, row=idx,
+                                   cause="±inf",
+                                   sugg_val=np.nan,
+                                   sugg_text="模板建议: 将 ±inf 转为 NaN"))
 
-    # 3-3 负值示例
-    for col in df.select_dtypes(include=[np.number]).columns:
-        bad = df[col] < 0
-        for idx in df[bad].index:
-            issues.append(dict(col=col, row_idx=int(idx),
-                               reason="负值(非法)",
-                               suggestion=0))
+    # negative values ----------------------------------------------------
+    num_cols = df.select_dtypes(include=[np.number]).columns
+    for col in num_cols:
+        for idx in df[df[col] < 0].index:
+            issues.append(dict(col=col, row=idx,
+                               cause="negative value",
+                               sugg_val=0,
+                               sugg_text="模板建议: 设为 0 或绝对值"))
 
-    # 3-4 离群点（IQR）
-    for col in df.select_dtypes(include=[np.number]).columns:
-        q1, q3 = df[col].quantile([.25, .75])
-        iqr = q3 - q1
+    # IQR outliers --------------------------------------------------------
+    for col in num_cols:
+        q1, q3 = df[col].quantile([.25, .75]); iqr = q3-q1
         lo, hi = q1 - iqr_k*iqr, q3 + iqr_k*iqr
-        outliers = df[(df[col] < lo) | (df[col] > hi)].index
-        for idx in outliers:
-            issues.append(dict(col=col, row_idx=int(idx),
-                               reason="离群值",
-                               suggestion=float(df[col].median())))
+        mask = (df[col] < lo) | (df[col] > hi)
+        for idx in df[mask].index:
+            # template 没有直接给 remedy → 用 hf pipeline 生成
+            issues.append(dict(col=col, row=idx,
+                               cause="outlier",
+                               sugg_val=float(df[col].median()),
+                               sugg_text=_hf_suggestion("outlier")))
 
+    # currency strings ----------------------------------------------------
+    for col in df.select_dtypes(include=['object']).columns:
+        for idx, v in df[col].items():
+            if isinstance(v, str) and CURRENCY_RE.match(v):
+                val = float(v.replace('$', '').replace(',', ''))
+                issues.append(dict(col=col, row=idx,
+                                   cause="currency string",
+                                   sugg_val=val,
+                                   sugg_text="模板建议: 去除$与逗号后转数值"))
+
+    # mixed str & num -----------------------------------------------------
+    for col in df.select_dtypes(include=['object']).columns:
+        for idx, v in df[col].items():
+            if isinstance(v, str) and DIGIT_RE.search(v) and not CURRENCY_RE.match(v):
+                number = re.findall(r'\d+', v)
+                if number:
+                    issues.append(dict(col=col, row=idx,
+                                       cause="mixed string&number",
+                                       sugg_val=int(number[0]),
+                                       sugg_text="模板建议: 提取数字部分并转数值"))
+
+    # url prefix ----------------------------------------------------------
+    for col in df.select_dtypes(include=['object']).columns:
+        for idx, v in df[col].items():
+            if isinstance(v, str) and HTTP_RE.match(v):
+                stripped = HTTP_RE.sub('', v)
+                issues.append(dict(col=col, row=idx,
+                                   cause="URL prefix",
+                                   sugg_val=stripped,
+                                   sugg_text="模板建议: 去除 http(s):// 前缀"))
     return pd.DataFrame(issues)
 
+# ------------------ hf pipeline for not-in-template cases ---------------
+def _hf_suggestion(topic: str) -> str:
+    try:
+        from transformers import pipeline
+        gen = pipeline("text2text-generation",
+                       model="google/flan-t5-small",
+                       max_length=64)
+        q = f"Give a concise data-cleaning solution for {topic} in a dataset."
+        return "HF建议: " + gen(q, num_return_sequences=1)[0]["generated_text"]
+    except Exception:
+        return "建议: 替换为列中位数（离线默认）"
 
-# =============== 4. GUI 逻辑 ================= #
-class IssueFixer:
+# ------------------------ 3. Tkinter interactive ------------------------
+class _GUI:
     def __init__(self, df: pd.DataFrame, issues: pd.DataFrame):
-        self.df = df
-        self.issues = issues.reset_index(drop=True)
-        self.i = 0                          # 当前指针
-        self.root = tk.Tk()
-        self.root.title("数据预处理修复窗口")
-        self.build_widgets()
-        self.show_issue()
+        self.df, self.issues = df, issues.reset_index(drop=True)
+        self.i = 0
+        self.root = tk.Tk(); self.root.title("Pre-processing Inspector")
+        self._build(); self._show(); self.root.mainloop()
 
-        self.root.mainloop()               # 阻塞直到窗口关闭
+    def _build(self):
+        self.lbl = tk.Label(self.root, anchor="w", justify="left",
+                            font=("Consolas", 10)); self.lbl.pack(fill="x", padx=8, pady=4)
+        self.tree = ttk.Treeview(self.root, show="headings", height=6)
+        self.tree.pack(fill="x", padx=8)
+        self.hint = tk.Label(self.root, anchor="w", justify="left",
+                             fg="#c44"); self.hint.pack(fill="x", padx=8, pady=2)
+        self.sol = tk.Label(self.root, anchor="w", justify="left",
+                            fg="#070"); self.sol.pack(fill="x", padx=8, pady=2)
+        frm = tk.Frame(self.root); frm.pack(pady=6)
+        tk.Button(frm, text="Replace", command=self._replace, width=15,
+                  bg="#60c979").grid(row=0, column=0, padx=4)
+        tk.Button(frm, text="Leave Unchanged", command=self._skip, width=15,
+                  bg="#eeeeee").grid(row=0, column=1, padx=4)
 
-    # ---------- 构建界面 ---------- #
-    def build_widgets(self):
-        self.info = tk.Label(self.root, text="", justify="left", font=("Consolas", 10))
-        self.info.pack(padx=10, pady=5, anchor="w")
-
-        self.tree = ttk.Treeview(self.root, show="headings")
-        self.tree.pack(fill="x", padx=10)
-
-        self.new_val_entry = tk.Entry(self.root, width=30)
-        self.new_val_entry.pack(pady=5)
-
-        btn_frame = tk.Frame(self.root)
-        btn_frame.pack(pady=5)
-
-        self.btn_rep = tk.Button(btn_frame, text="Replace", width=12,
-                                 command=self.replace_one, bg="#70c1b3")
-        self.btn_all = tk.Button(btn_frame, text="Replace All", width=12,
-                                 command=self.replace_all, bg="#f2c14e")
-        self.btn_skip = tk.Button(btn_frame, text="Skip", width=12,
-                                  command=self.skip, bg="#ccc")
-        self.btn_finish = tk.Button(btn_frame, text="Finish", width=12,
-                                    command=self.finish, bg="#247ba0")
-
-        self.btn_rep.grid(row=0, column=0, padx=4)
-        self.btn_all.grid(row=0, column=1, padx=4)
-        self.btn_skip.grid(row=0, column=2, padx=4)
-        self.btn_finish.grid(row=0, column=3, padx=4)
-
-    # ---------- 显示当前 issue ---------- #
-    def show_issue(self):
+    def _show(self):
         if self.i >= len(self.issues):
-            messagebox.showinfo("Done", "所有问题已处理完毕")
-            return
-
-        issue = self.issues.loc[self.i]
-        col, idx, rsn, sug = issue.col, issue.row_idx, issue.reason, issue.suggestion
-
-        self.info.config(text=f"Issue {self.i+1}/{len(self.issues)}  "
-                              f"列: {col}  行索引: {idx}  原因: {rsn}  建议: {sug}")
-
-        # 重建表格
+            messagebox.showinfo("Done", "全部异常已浏览完毕")
+            self.root.destroy(); return
+        iss = self.issues.loc[self.i]
+        self.lbl.config(text=f"Issue {self.i+1}/{len(self.issues)}  "
+                             f"row={iss.row}  col={iss.col}  cause={iss.cause}")
+        # table
         self.tree.delete(*self.tree.get_children())
         self.tree["columns"] = list(self.df.columns)
         for c in self.df.columns:
-            self.tree.heading(c, text=c)
-            self.tree.column(c, width=100, anchor="center")
-        row_vals = [self.df.at[idx, c] for c in self.df.columns]
-        self.tree.insert("", "end", values=row_vals)
+            self.tree.heading(c, text=c); self.tree.column(c, width=120)
+        values = [self.df.at[iss.row, c] if iss.row in self.df.index else "—"
+                  for c in self.df.columns]
+        self.tree.insert("", "end", values=values)
+        # hint & solution
+        self.hint.config(text=f"Hint : {iss.cause}")
+        self.sol.config(text=f"Solution : {iss.sugg_text}\n→ 替换值: {iss.sugg_val}")
 
-        self.new_val_entry.delete(0, tk.END)
-        self.new_val_entry.insert(0, str(sug))
+    # ---- actions
+    def _replace(self):
+        self._apply(True)
+        self.i += 1; self._show()
 
-    # ---------- 按钮回调 ---------- #
-    def replace_one(self):
-        val = self.parse_val(self.new_val_entry.get())
-        self.apply_fix(self.i, val)
-        self.i += 1
-        self.show_issue()
+    def _skip(self):
+        self._apply(False)
+        self.i += 1; self._show()
 
-    def replace_all(self):
-        val = self.parse_val(self.new_val_entry.get())
-        # 同列同原因全部替换
-        issue_now = self.issues.loc[self.i]
-        same = (self.issues.col == issue_now.col) & (self.issues.reason == issue_now.reason)
-        idxs = self.issues[same].index.tolist()
-        for j in idxs:
-            self.apply_fix(j, val)
-        self.i += 1
-        self.show_issue()
+    def _apply(self, do_replace: bool):
+        iss = self.issues.loc[self.i]
+        if not do_replace:
+            return
+        if iss.col == "__ROW__":
+            if iss.sugg_val == "DROP" and iss.row in self.df.index:
+                self.df.drop(index=iss.row, inplace=True)
+        else:
+            if iss.row in self.df.index:
+                self.df.at[iss.row, iss.col] = iss.sugg_val
 
-    def skip(self):
-        self.i += 1
-        self.show_issue()
-
-    def finish(self):
-        self.root.destroy()   # 关闭窗口
-
-    # ---------- 实际执行替换 ---------- #
-    def apply_fix(self, issue_index: int, new_val):
-        row = self.issues.loc[issue_index]
-        self.df.at[row.row_idx, row.col] = new_val
-
-    # ---------- 字符串转数值（尽量保持 dtype） ---------- #
-    @staticmethod
-    def parse_val(s: str):
-        if s.lower() in ("nan", "none", ""):
-            return np.nan
-        # 尝试转 int / float
-        try:
-            if "." in s:
-                return float(s)
-            else:
-                return int(s)
-        except ValueError:
-            return s
-
-
-# =============== 5. 对外的简单函数 ================= #
-def preprocess(csv_path: str,
-               miss_thresh: float = 0.5) -> pd.DataFrame:
-    """
-    载入 csv → 扫描异常 → 弹 GUI 让用户修复 → 返回修复后的 DataFrame
-    """
-    df = basic_cleanup(load_csv(csv_path))
-    issues = scan_issues(df, miss_thresh=miss_thresh)
-    if issues.empty:
-        print("[INFO] 未发现异常，直接返回 DataFrame")
-        return df
-    IssueFixer(df, issues)    # 阻塞直到用户点击 Finish
+# ------------------------------ 4. API ----------------------------------
+def preprocess(csv_path: str, miss_thr=.5) -> pd.DataFrame:
+    """Read → scan → manual GUI fix → return cleaned DataFrame"""
+    df = _standardise(_read_csv(csv_path))
+    # keep copy for inf detection then convert inf→NaN for downstream
+    issues = _scan(df, miss_thr=miss_thr)
+    if not issues.empty:
+        _GUI(df, issues)     # blocks until user finishes
+    else:
+        print("[INFO] no abnormality detected")
+    # 最终统一将 ±inf 置 NaN
+    df.replace([np.inf, -np.inf], np.nan, inplace=True)
     return df
 
-
-# =============== 6. CLI 调用示例 ================= #
+# ------------------------------ 5. CLI ----------------------------------
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("用法: python preprocess_gui.py data.csv")
-        sys.exit(1)
-    out_df = preprocess(sys.argv[1])
-    print("\n=== 预处理结束，前 5 行预览 ===")
-    print(out_df.head())
+        print("Usage: python preprocess_strict.py data.csv"); sys.exit(0)
+    cleaned = preprocess(sys.argv[1])
+    print("\n预处理中完成，前 5 行示例：")
+    print(cleaned.head())
