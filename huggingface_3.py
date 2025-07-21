@@ -1,4 +1,7 @@
 """
+Please install the `datasets` library beforehand to run this script:
+`pip install -U datasets`
+
 huggingface_3.py
 by Jingjing YAO (Jerry)
 
@@ -59,18 +62,79 @@ def load_and_tokenize() -> Dict[str, Any]:
     from datasets import load_dataset
     from transformers import AutoTokenizer, DataCollatorWithPadding
 
-    # --- dataset ----------------------------------------------------
-    default_name = "glue"
-    default_config = "mrpc"
-    ds_name = input(f"Dataset name (default {default_name}): ").strip() or default_name
-    ds_cfg = input(f"Dataset config (default {default_config}): ").strip() or default_config
-    raw_datasets = load_dataset(ds_name, ds_cfg)
-    print(raw_datasets)
+    # ==================== 1. Load Dataset ====================== #
+    print("As demonstrated in the tutorial, a MRPC DatasetDict from the GLUE benchmark can be downloaded with:")
+    print("raw_datasets = load_dataset('glue', 'mrpc')")
+    print("But upon checking, it appears to be a legacy method based on its latest documentation and `load_dataset`'s documentation:")
+    print("https://huggingface.co/datasets/nyu-mll/glue?library=datasets")
+    print("https://huggingface.co/docs/datasets/v1.13.2/package_reference/loading_methods.html#datasets.load_dataset")
+    input("Press enter to load the dataset using `ds = load_dataset('nyu-mll/glue', 'mrpc')` ...")
+    raw_datasets = load_dataset("nyu-mll/glue", "mrpc")
+    print(f"By default the dataset is going to be downloaded to {pathlib.Path.home() / '.cache' / 'huggingface' / 'datasets'}")
+    print("To change the cache directory, set the environment variable `HF_HOME`.")
+    input("Press Enter to continue...")
 
-    # --- tokenizer --------------------------------------------------
-    ckpt = input("Base checkpoint for both tokenizer & model "
+    # ==================== 2. Split Dataset ====================== #
+    print(f"Returned dataset (DatasetDict): \n{raw_datasets}")
+    print("As demonstrated, the DatasetDict has already been split into train / validation / test Datasets.")
+    print("By indexing, we can split it into train / validation / test sets (e.g., raw_datasets['train']): ")
+    raw_train_dataset, raw_validation_dataset, raw_test_dataset = raw_datasets["train"], raw_datasets["validation"], raw_datasets["test"]
+    print(f"raw_datasets['train']: {raw_train_dataset}")
+    print("Where each datapoint can be accessed by indexing as well (e.g., raw_datasets['train'][0]): ")
+    print(f"The train set's first datapoint: {raw_train_dataset[0]}")
+    input("Press Enter to continue...")
+    if yes("Check the dataset's features? (Y/N) "):
+        print("Using `raw_train_dataset.features` to inspect the features of the dataset...")
+        print(raw_train_dataset.features)
+        print("Where the `ClassLabel` type is the mapping of the label names to integers (0 == not_equivalent).")
+        input("Press Enter to continue...")
+    
+    #============ Dataset Check ============#
+    if yes("Have you noticed that the idx of the validation set's datapoints are not in order? (Y/N) "):
+        print("It appears that the datapoints in the validation set are taken randomly from the train set...")
+        print("Where the test set is on its own, aren't they?")
+    else:
+        print("Lookup the dataset on Hugging Face Datasets to check its information.")
+        print('e.g., in this case lookup the `mrpc` "subset" under the `nyu-mll/glue` "dataset"')
+    input("Press Enter to continue...")
+
+    # ==================== 3. Tokenization ====================== #
+    ckpt = input("Checkpoint for both tokenizer & model "
                  "(default bert-base-uncased): ").strip() or "bert-base-uncased"
+    print("Using AutoTokenizer here for demonstration purposes")
     tokenizer = AutoTokenizer.from_pretrained(ckpt)
+
+    print("Being a paraphrase corpus, `mrpc` needs to be handled as a sentence pair classification task...")
+    print("Where it appears that not only Bert's tokenizer can handle more than one sentence (e.g., GPT-2).")
+    print("In BERT's case, the returned input ids are merged into a single sequence...")
+    print("Where the token_type_ids are used to differentiate the two sentences specifically for BERT's 'next sentence prediction' tasks.")
+    print("E.g., when two sentences `This is the first sentence.` and `This is the second sentence.` are tokenized with" \
+    "`tokenizer('This is the first sentence.', 'This is the second sentence.')`, below is the output:")
+    print(tokenizer("This is the first sentence.", "This is the second sentence."))
+    input("Press Enter to continue...")
+
+    #============ Token Type IDs Check ============#
+    print("See the `token_type_ids` are formed with 8 zeros followed by 8 ones?")
+    print("Recall that a BERT tokenizer uses the special tokens [CLS] and [SEP]?")
+    input("Press Enter to continue...")
+
+    #============ Special Tokens Check ============#
+    if yes("Do you know the difference between `tokenizer.decode` & `tokenizer.convert_ids_to_tokens`? (Y/N) "):
+        pass
+    else:
+        print("The `tokenizer.decode` method decodes the input ids directly into a string, "
+              "while `tokenizer.convert_ids_to_tokens` converts the input ids (in a list) into tokens (in a list).")
+        print("E.g., `tokenizer.decode([101, 2023, 2003, 1996, 2468, 102])` returns "
+              "'[CLS] this is the first sentence. [SEP]', while "
+              "`tokenizer.convert_ids_to_tokens([101, 2023, 2003, 1996, 2468, 102])` returns "
+              "`['[CLS]', 'this', 'is', 'the', 'first', 'sentence.', '[SEP]']`.")
+        input("Press Enter to continue...")
+
+    print("For simplicity, `tokenizer(raw_train_dataset['sentence1'], raw_train_dataset['sentence2'], " \
+    "padding=True, truncation=True)` can be used directly to tokenize all datapoints.")
+    print("But considering its returned 'lists of lists' and RAM usage, Dataset.map() is suggested.")
+
+    
 
     # decide whether we have sentence pairs or single sentences
     sample = raw_datasets["train"][0]
@@ -258,7 +322,6 @@ def custom_loop(bundle: Dict[str, Any]):
 
 # ------------------------------- main ------------------------------ #
 def main():
-    print("=== Fine-tuning playground (Ch. 3) ===")
     bundle = load_and_tokenize()
 
     choice = input(
