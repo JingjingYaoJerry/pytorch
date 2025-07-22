@@ -1,6 +1,6 @@
 """
-Please install the `datasets` library beforehand to run this script:
-`pip install -U datasets`
+Please install the `datasets` and `evaluate` libraries beforehand to run this script:
+`pip install -U datasets evaluate`
 
 huggingface_3.py
 by Jingjing YAO (Jerry)
@@ -22,6 +22,8 @@ import os
 import sys
 import pathlib
 from typing import Optional, Dict, Any
+from colorama import Fore, Style
+from sympy import evaluate
 
 import torch
 
@@ -47,20 +49,13 @@ def save_to_dir(model, tokenizer, directory: str) -> None:
     print(f"✓ Saved model{' & tokenizer' if tokenizer else ''} to {directory}")
 
 
-# ---------------------- data preparation --------------------------- #
-def load_and_tokenize() -> Dict[str, Any]:
+# ---------------------- Trainer Branch --------------------------- #
+def Trainer():
     """
-    Download a dataset with 🤗 Datasets and tokenize it.
-    Returns a dict:
-      {
-        "tokenized": DatasetDict,
-        "data_collator": callable,
-        "label_names": list[str],
-        "num_labels": int,
-      }
+    Fine-tune a model with `transformers.Trainer`.
     """
     from datasets import load_dataset
-    from transformers import AutoTokenizer, DataCollatorWithPadding
+    from transformers import AutoTokenizer
 
     # ==================== 1. Load Dataset ====================== #
     print("As demonstrated in the tutorial, a MRPC DatasetDict from the GLUE benchmark can be downloaded with:")
@@ -132,105 +127,173 @@ def load_and_tokenize() -> Dict[str, Any]:
 
     print("For simplicity, `tokenizer(raw_train_dataset['sentence1'], raw_train_dataset['sentence2'], " \
     "padding=True, truncation=True)` can be used directly to tokenize all datapoints.")
-    print("But considering its returned 'lists of lists' and RAM usage, Dataset.map() is suggested.")
-
+    print("But considering its returned 'lists of lists' and RAM usage, Dataset.map() is suggested...")
+    print("Which can apply the tokenization function (or more) to each datapoint in the dataset, just like the `map` function in Python~")
+    print("i.e., ")
+    print(Fore.BLUE)
+    print("def tokenize_function(example):")
+    print("\treturn tokenizer(example['sentence1'], example['sentence2'], truncation=True)")
+    print("tokenized_datasets = raw_datasets.map(tokenize_function, batched=True) # batched=True enables batch processing of the function")
+    print(Style.RESET_ALL)
     
-
-    # decide whether we have sentence pairs or single sentences
-    sample = raw_datasets["train"][0]
-    guess_cols = [c for c in sample if sample[c] and isinstance(sample[c], str)]
-    if len(guess_cols) >= 2:
-        sent1_col, sent2_col = guess_cols[:2]
+    #============ Padding Check ============#
+    if yes("Does the setting of the `padding` argument here make difference? (Y/N) "):
+        print("Yes, it does; do recall both the efficiency of padding in different places and the model's requirement of rectangular tensors.") 
     else:
-        sent1_col, sent2_col = guess_cols[0], None
-    print(f"◾ text columns detected: {sent1_col}"
-          f"{' / ' + sent2_col if sent2_col else ''}")
+        print("Not really, the `padding` here would pad all samples to one maximum length...")
+        print("Recall that one batch is processed at a time, and hence the most efficient way is to pad every sample in the " \
+              "batch to the maximum length of that batch, instead of padding all samples to the maximum length of the entire " \
+              "dataset to satisfy the rectangular tensor requirement from the model.")
+    input("Press Enter to continue...")
 
-    # tokenization function
-    def tok_fn(ex):
-        if sent2_col:
-            return tokenizer(ex[sent1_col], ex[sent2_col],
-                             truncation=True)
-        return tokenizer(ex[sent1_col], truncation=True)
+    # Tokenization Function Mapping
+    def tokenize_function(example):
+        return tokenizer(example["sentence1"], example["sentence2"], truncation=True)
+    tokenized = raw_datasets.map(tokenize_function, batched=True)
+    print("This way all three splits are tokenized and having input_ids, attention_mask, and token_type_ids.")
+    print("i.e., ['sentence1', 'sentence2', 'label', 'idx', 'input_ids', 'token_type_ids', 'attention_mask']")
+    input("Press Enter to continue...")
 
-    tokenized = raw_datasets.map(tok_fn, batched=True, remove_columns=guess_cols + ["idx"]
-                                 if "idx" in sample else guess_cols)
-    data_collator = DataCollatorWithPadding(tokenizer)
-    label_info = raw_datasets["train"].features["label"]
-    label_names = label_info.names if hasattr(label_info, "names") else None
-    num_labels = label_info.num_classes if hasattr(label_info, "num_classes") else 1
+    # ==================== 4. Define Collator ====================== #
+    if yes("Do you know about the collate function? (Y/N) "):
+        if yes("Fantastic! You know how it's used, right?"):
+            print("Great! Now we will follow the logic to create a collator for dynamic padding with the `DataCollatorWithPadding`.")
+        else:
+            print("`collate_fn` is a parameter of the pytorch DataLoader responsible for batching the samples.")
+    else:
+        print("The `collate_fn` is a function that takes a list of samples and returns a batch.")
+        print("It is used to pad the samples to the same length, so they can be processed in a batch.")
+        print("In this case, we will use the `DataCollatorWithPadding` from the Transformers library to handle dynamic padding.")
+        print("It will pad the samples to the maximum length of the batch, instead of the maximum length of the entire dataset.")
+    input("Press Enter to continue...")
+    from transformers import DataCollatorWithPadding
+    data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+    print("`DataCollatorWithPadding(tokenizer=tokenizer)` is used to return the collator.")
 
-    return dict(
-        tokenized=tokenized,
-        data_collator=data_collator,
-        label_names=label_names,
-        num_labels=num_labels,
-        checkpoint=ckpt,
-        tokenizer=tokenizer,
-    )
+    # ==================== 5. Construct Trainer ====================== #
+    from transformers import TrainingArguments
+    print("Four steps to construct a Trainer:")
+    print(Fore.GREEN + "1. Define the training hyperparameters with `TrainingArguments`:" + Style.RESET_ALL)
+    if yes("Do you know what's the must-have argument for `TrainingArguments`? (Y/N) "):
+        print("Do recall that `output_dir` is the directory where the model predictions and checkpoints will be saved.")
+    else:
+        print("The must-have argument for `TrainingArguments` is `output_dir`.")
+    print("It is the directory where the model predictions and checkpoints will be saved.")
+    input("Press Enter to continue...")
+    print("The default output_dir `trainer_output` is used here for demonstration purposes.")
 
+    #============ Training Arguments Demo ============#
+    print("Check all available parameters for `TrainingArguments` in its documentation:")
+    print("https://huggingface.co/docs/transformers/main/en/main_classes/trainer#transformers.TrainingArguments")
+    print("One parameter that was demonstrated is `eval_strategy`; by setting it to `epoch`, an evaluation would occur at the end of each epoch rather than after some steps.")
+    print("Another parameter is `fp16`, which is used to enable mixed precision training with 16-bit floating-point numbers for faster training and reduced memory usage.")
+    print("Another parameter is `gradient_accumulation_steps`, which is used to accumulate gradients over the specified # of batches before performing backpropagation.")
+    print("Calling `TrainingArguments('trainer_output', eval_strategy='epoch', fp16=True, gradient_accumulation_steps=4)` for demonstration...")
+    training_args = TrainingArguments("trainer_output", eval_strategy="epoch", fp16=True, gradient_accumulation_steps=4)
+    input("Press Enter to continue...")
+    
+    print(Fore.GREEN + "2. Define the model:" + Style.RESET_ALL)
+    from transformers import AutoModelForSequenceClassification
+    print(Fore.BLUE + "Calling `model = AutoModelForSequenceClassification.from_pretrained(ckpt, num_labels=2)` for demonstration..." + Style.RESET_ALL)
+    print(Fore.GREEN + "A warning may appear here just to indicate that the model needs to be fine-tuned for the specified task." + Style.RESET_ALL)
+    model = AutoModelForSequenceClassification.from_pretrained(ckpt, num_labels=2)
 
-# ------------------------- Trainer branch -------------------------- #
-def trainer_workflow(bundle: Dict[str, Any]):
-    from transformers import (AutoModelForSequenceClassification, TrainingArguments,
-                              Trainer)
-    import evaluate
-    import numpy as np
+    print(Fore.GREEN + "3. Deploy the metrics:" + Style.RESET_ALL)
+    print("Metrics are used to evaluate the model's performance during training and evaluation.")
+    print("To get metrics other than simple losses, `compute_metrics()` is suggested to be defined...")
+    print("Where it is to be defined as below:")
+    print(Fore.BLUE)
+    print("def compute_metrics(eval_preds):")
+    print("\tmetric = evaluate.load('glue', 'mrpc') # or any other metric")
+    print("\tlogits, labels = eval_preds")
+    print("\tpredictions = np.argmax(logits, axis=-1) # or any other way to get predictions")
+    print("\treturn metric.compute(predictions=predictions, references=labels)")
+    print(Style.RESET_ALL)
 
-    ckpt = bundle["checkpoint"]
-    model = AutoModelForSequenceClassification.from_pretrained(
-        ckpt, num_labels=bundle["num_labels"])
+    #============ evaluate.load Check ============#
+    if yes("Do you know why it is 'glue' here rather than 'nyu-mll/glue'? (Y/N) "):
+        pass
+    else:
+        print("According to `evaluate.load`'s documentation: ")
+        print("https://huggingface.co/docs/evaluate/v0.1.2/en/package_reference/loading_methods#evaluate.load.path")
+        print("The first argument is either a local path to a metric script or a evaluation identifier on the `evaluate` repo...")
+        print("Where all available metrics can be found at https://github.com/huggingface/evaluate/tree/main/metrics")
+        print("i.e., `glue` is one of the available identifiers, where `mrpc` is the `config_name` for the subset.")
+    input("Press Enter to continue...")
 
-    # --- TrainingArguments -----------------------------------------
-    out_dir = input("Output directory (default ./results): ").strip() or "./results"
-    training_args = TrainingArguments(
-        output_dir=out_dir,
-        evaluation_strategy="epoch",
-        save_strategy="epoch",
-        learning_rate=2e-5,
-        per_device_train_batch_size=16,
-        num_train_epochs=3,
-        weight_decay=0.01,
-        report_to="none",     # tip: set to “wandb” to log curves
-        push_to_hub=False,
-    )
+    #============ Logits Check ============#
+    if yes("Can you recall what `np.argmax(logits, axis=-1)` does? (Y/N) "):
+        pass
+    else:
+        print("Do recall that a Transformers model outputs logits, which are the raw unnormalized predictions that need post-processing.")
+        print("The shape of the logits is going to be something like (batch_size, num_labels), right?")
+        print("Here what we are interested in is the predicted label for each sample, where we can then use them to compare with the true labels, right?")
+        print("So by calling `np.argmax(logits, axis=-1)`, we are getting the index of the maximum value in each row (i.e., among the logits) of the sample array, right?")
+    print("Also, do recall that by calling `trainer.predict()`, predictions, label_ids, and metrics (with just losses) are returned by the Trainer.")
+    input("Press Enter to continue...")
+    from evaluate import load
+    def compute_metrics(eval_preds):
+        metric = evaluate.load("glue", "mrpc")
+        logits, labels = eval_preds
+        predictions = np.argmax(logits, axis=-1)
+        return metric.compute(predictions=predictions, references=labels)
+    print("By defining the `compute_metrics` function, the trainer can report the validation loss and metrics at the end of each epoch on top of the training loss.")
+    print(Fore.GREEN + "It'd be the post-processing function for the predictions returned by the Trainer." + Style.RESET_ALL)
+    input("Press Enter to continue...")
 
-    # --- metrics ----------------------------------------------------
-    metric = evaluate.load("glue", "mrpc") if bundle["label_names"] else None
+    print(Fore.GREEN + "4. Define the Trainer:" + Style.RESET_ALL)
+    print("Do recall that the Trainer is a high-level API for training and evaluating models.")
+    if yes("Do you remember which other arguments are required for the Trainer? (Y/N) "):
+        pass
+    else:
+        print("Some other required arguments for the Trainer are:")
+        print(Fore.BLUE + "`train_dataset` & `eval_dataset` & `data_collator` & `processing_class`" + Style.RESET_ALL)
+    input("Press Enter to continue...")
 
-    def compute_metrics(eval_pred):
-        if metric is None:
-            return {}
-        logits, labels = eval_pred
-        preds = np.argmax(logits, axis=-1)
-        return metric.compute(predictions=preds, references=labels)
+    #============ eval_dataset Check ============#
+    if yes("Is the missing of `eval_dataset` going to cause an error? (Y/N) "):
+        print("Not really, do recall that what the evaluation is for during training, and which component is used for the updating of the model's weights!!!")
+    else:
+        print("That's right, though no metrics will be reported during training, the model's weights will still be updated and the training carries on.")
+    input("Press Enter to continue...")
 
+    print(Fore.BLUE + "Calling `trainer = Trainer(model=model, args=training_args, train_dataset=tokenized['train'], eval_dataset=tokenized['validation'], "
+    "data_collator=data_collator, processing_class=tokenizer, compute_metrics=compute_metrics)` for demonstration..." + Style.RESET_ALL)
+    if yes("Do you remember what the `processing_class` is? (Y/N) "):
+        if yes("Great! Then you know how it's affecting the passing of the `data_collator` argument, right? (Y/N) "):
+            pass
+        else:
+            print("Once a tokenizer is passed to the `processing_class`, the `data_collator` argument is automatically set to `DataCollatorWithPadding(tokenizer)`.")
+            print("Hence, the data_collator we've defined earlier is no longer needed to be passed explicitly.")
+            print("i.e., `data_collator=data_collator` is not really needed in the Trainer.")
+    else:
+        print("The `processing_class` is the class that processes (i.e., dynamically pads) the data before passing it to the model.")
+        print("Hence, the `data_collator` argument is automatically set to `DataCollatorWithPadding(tokenizer)`.")
+        print("i.e., `data_collator=data_collator` is not really needed in the Trainer.")
+    input("Press Enter to continue...")
+    from transformers import Trainer
     trainer = Trainer(
         model=model,
         args=training_args,
-        train_dataset=bundle["tokenized"]["train"],
-        eval_dataset=bundle["tokenized"]["validation"],
-        tokenizer=bundle["tokenizer"],
-        data_collator=bundle["data_collator"],
-        compute_metrics=compute_metrics,
+        train_dataset=tokenized['train'],
+        eval_dataset=tokenized['validation'],
+        data_collator=data_collator,
+        processing_class=tokenizer, 
+        compute_metrics=compute_metrics
     )
 
-    print("🟢 Starting training with Trainer API …")
+    # ==================== 6. Fine-Tune ====================== #
+    print("Now we can train the model with the Trainer's `train()` method.")
+    print(Fore.BLUE + "Calling `trainer.train()` for demonstration..." + Style.RESET_ALL)
     trainer.train()
+    predictions = trainer.predict(tokenized['test'])
+    return predictions
 
-    print("📊 Final evaluation:")
-    eval_res = trainer.evaluate()
-    print(eval_res)
-
-    if yes("Save this fine-tuned checkpoint? (Y/N) "):
-        save_to_dir(model, bundle["tokenizer"],
-                    input("Dir (default ./finetuned): ").strip() or "./finetuned")
 
     print("💡  Tip: set TrainingArguments.report_to='wandb' "
           "and watch learning curves in real time (see 3_4.txt).")
 
-
-# ---------------------- manual loop branch ------------------------ #
+# ---------------------- PyTorch Branch ------------------------ #
 def custom_loop(bundle: Dict[str, Any]):
     from transformers import (AutoModelForSequenceClassification, get_scheduler)
     from torch.utils.data import DataLoader
