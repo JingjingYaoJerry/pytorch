@@ -1,6 +1,8 @@
 """
-Please install the `datasets` and `evaluate` libraries beforehand to run this script:
+Please install the `datasets` and `evaluate` Hugging Face libraries beforehand to run this script:
 `pip install -U datasets evaluate`
+It'd be helpful to have the third-party `wandb` library installed as well for logging and visualization:
+`pip install -U wandb`
 
 huggingface_3.py
 by Jingjing YAO (Jerry)
@@ -191,7 +193,21 @@ def Trainer():
     print("Calling `TrainingArguments('trainer_output', eval_strategy='epoch', fp16=True, gradient_accumulation_steps=4)` for demonstration...")
     training_args = TrainingArguments("trainer_output", eval_strategy="epoch", fp16=True, gradient_accumulation_steps=4)
     input("Press Enter to continue...")
-    
+
+    #============ wandb Demo ============#
+    print("According to the tutorial, it's displayed that the `wandb` module, the `report_to` & `logging_steps` arguments in the Trainer API can be used together for logging and visualization.")
+    if yes("Would you like to give it a try? (Y/N) "):
+        print("To use `wandb`, firstly we need to initialize it with `wandb.init()`.")
+        print(Fore.BLUE + "Executing `import wandb`..." + Style.RESET_ALL)
+        import wandb
+        print(Fore.BLUE + "Executing `wandb.init(project='transformer-fine-tuning', name='bert-mrpc-analysis')`..." + Style.RESET_ALL)
+        print("Where referring to its documentation `https://docs.wandb.ai/ref/python/sdk/functions/init/`, `project` is the name of the project under which this run will be logged, " \
+        "and `name` is the display name for this run which appears in the UI.")
+        wandb.init(project="transformer-fine-tuning", name="bert-mrpc-analysis")
+        print(Fore.BLUE + "Executing `training_args = TrainingArguments('trainer_output', eval_strategy='epoch', fp16=True, gradient_accumulation_steps=4, logging_steps=10, report_to='wandb')`..." + Style.RESET_ALL)
+        training_args = TrainingArguments("trainer_output", eval_strategy="epoch", fp16=True, gradient_accumulation_steps=4, logging_steps=10, report_to="wandb")
+    input("Let's wait and see how is it going to be displayed in the WandB UI... Press Enter to continue...")
+
     print(Fore.GREEN + "2. Define the model:" + Style.RESET_ALL)
     from transformers import AutoModelForSequenceClassification
     print(Fore.BLUE + "Calling `model = AutoModelForSequenceClassification.from_pretrained(ckpt, num_labels=2)` for demonstration..." + Style.RESET_ALL)
@@ -526,6 +542,40 @@ def custom_torch():
                 metric.add_batch(predictions=preds, references=batch["labels"])
             metric.compute() # Compute the metrics for the current epoch
         model.train()
+
+    print("Congratulations! The model has been fine-tuned with PyTorch!")
+    print("Hooray! 🎉")
+
+    if yes("Would you like some desserts (^_^)? (Y/N) "):
+        print("Great! Here's some extra on training with multiple GPUs or TPUs (i.e., distributed training):")
+        print("By utilizing the `accellerate` library, distributed training can be achieved with changes in 3 places.")
+        print("An example is presented below:")
+        print(Fore.BLUE)
+        print("from accelerate import Accelerator")
+        print("from torch.optim import AdamW")
+        print("from transformers import AutoModelForSequenceClassification, get_scheduler")
+        print(Fore.GREEN + "# Instantiates an Accelerator object that will look at the environment and initialize the proper distributed setup" + Fore.BLUE)
+        print("accelerator = Accelerator() # Instantiates an Accelerator object that will look at the environment and initialize the proper distributed setup")
+        print(Fore.BLUE + "model = AutoModelForSequenceClassification.from_pretrained(checkpoint, num_labels=2)" + Style.RESET_ALL)
+        print("optimizer = AdamW(model.parameters(), lr=3e-5)")
+        print(Fore.GREEN + "# Wrap the dataloaders, model, and optimizer in the accelerator container to enable distributed training" + Fore.BLUE)
+        print("train_dl, eval_dl, model, optimizer = accelerator.prepare(train_dataloader, eval_dataloader, model, optimizer) # no `to(device)` is needed later on")
+        print("num_epochs = 3")
+        print("num_training_steps = num_epochs * len(train_dl)")
+        print("lr_scheduler = get_scheduler('linear', optimizer=optimizer, num_warmup_steps=0, num_training_steps=num_training_steps)")
+        print("progress_bar = tqdm(range(num_training_steps))")
+        print("model.train()")
+        print("for epoch in range(num_epochs):")
+        print("\tfor batch in train_dl:")
+        print("\t\toutputs = model(**batch)")
+        print("\t\tloss = outputs.loss")
+        print("\t\taccelerator.backward(loss) # the last alteration required")
+        print("\t\toptimizer.step()")
+        print("\t\tlr_scheduler.step()")
+        print("\t\toptimizer.zero_grad()")
+        print("\t\tprogress_bar.update(1)")
+        print(Style.RESET_ALL)
+        input("And this is it for the training (without evaluation) with distributed training! Press Enter to continue...")
 
     # if yes("Save final checkpoint? (Y/N) "):
     #     path = input("Directory (default ./finetuned): ").strip() or "./finetuned"
