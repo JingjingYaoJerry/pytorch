@@ -294,93 +294,251 @@ def Trainer():
           "and watch learning curves in real time (see 3_4.txt).")
 
 # ---------------------- PyTorch Branch ------------------------ #
-def custom_loop(bundle: Dict[str, Any]):
-    from transformers import (AutoModelForSequenceClassification, get_scheduler)
+def custom_torch():
+    """
+    Fine-tune a model with a custom PyTorch training loop.
+    """
+    #============ Trainer Branch Check ============#
+    print("To fine-tune a model with PyTorch instead of `transformers.Trainer`, the Hugging Face dataset needs to be preprocessed first.")
+    print("Follow the same first few steps as in the Trainer branch, including loading the dataset and tokenizing it.")
+    print("Executing the following codes...")
+    print(Fore.BLUE)
+    print("from datasets import load_dataset")
+    print("from transformers import AutoTokenizer, DataCollatorWithPadding")
+    print("raw_datasets = load_dataset('nyu-mll/glue', 'mrpc')")
+    print("ckpt = input('Checkpoint for both tokenizer & model (default bert-base-uncased): ').strip() or 'bert-base-uncased'")
+    print("tokenizer = AutoTokenizer.from_pretrained(ckpt)")
+    print("def tokenize_function(example):")
+    print("\treturn tokenizer(example['sentence1'], example['sentence2'], truncation=True)")
+    print("tokenized = raw_datasets.map(tokenize_function, batched=True)")
+    print("data_collator = DataCollatorWithPadding(tokenizer=tokenizer)")
+    print(Style.RESET_ALL)
+    print("Do recall concepts behind `load_dataset`, 'Dynamic Padding', `batched=True`, and `DataCollatorWithPadding`!")
+    # ==================== 1. Dataset Loading & Tokenization ====================== #
+    from datasets import load_dataset
+    from transformers import AutoTokenizer, DataCollatorWithPadding
+    raw_datasets = load_dataset("nyu-mll/glue", "mrpc")
+    ckpt = input("Checkpoint for both tokenizer & model "
+                 "(default bert-base-uncased): ").strip() or "bert-base-uncased"
+    tokenizer = AutoTokenizer.from_pretrained(ckpt)
+    def tokenize_function(example):
+        return tokenizer(example["sentence1"], example["sentence2"], truncation=True)
+    tokenized = raw_datasets.map(tokenize_function, batched=True)
+    data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+    input("Press Enter to continue...")
+
+    # ==================== 2. Preprocessing ====================== #
+    print("To compile PyTorch's training loop, the following steps are required (which can all be done with the DatasetDict's methods):")
+    print(Fore.GREEN + "1. Remove the unnecessary 'columns' from the DatasetDict:" + Style.RESET_ALL)
+    print("Do recall that the DatasetDict contains 'sentence1', 'sentence2', 'label', 'idx', 'input_ids', 'token_type_ids', and 'attention_mask' columns after tokenization!")
+    print(Fore.BLUE + "Executing `tokenized = tokenized.remove_columns(['sentence1', 'sentence2', 'idx'])`..." + Style.RESET_ALL)
+    tokenized = tokenized.remove_columns(['sentence1', 'sentence2', 'idx'])
+    print(Fore.GREEN + "2. Rename the column `label` to `labels` as expected by PyTorch:" + Style.RESET_ALL)
+    print(Fore.BLUE + "Executing `tokenized = tokenized.rename_column('label', 'labels')`..." + Style.RESET_ALL)
+    tokenized = tokenized.rename_column("label", "labels")
+    print(Fore.GREEN + "3. Set the format of the lists within the DatasetDict to PyTorch tensors:" + Style.RESET_ALL)
+    print(Fore.BLUE + "Executing `tokenized.set_format('torch')`..." + Style.RESET_ALL)
+    tokenized.set_format("torch")
+    print(f"Now the DatasetDict has the following columns: {tokenized.column_names}")
+    print(f"The {type(tokenized)} has become:")
+    print(tokenized)
+    input("Press Enter to continue...")
+
+    # ==================== 3. DataLoader Creation ====================== #
+    print("Now we can create the DataLoader.")
+    print(Fore.BLUE + "Executing `from torch.utils.data import DataLoader`..." + Style.RESET_ALL)
     from torch.utils.data import DataLoader
-    import evaluate
-    from tqdm.auto import tqdm
+    print(Fore.BLUE + "Executing `train_dataloader = DataLoader(tokenized['train'], shuffle=True, batch_size=8, collate_fn=data_collator)`..." + Style.RESET_ALL)
+    train_dataloader = DataLoader(tokenized["train"], shuffle=True, batch_size=8, collate_fn=data_collator)
+    print(Fore.BLUE + "Executing `eval_dataloader = DataLoader(tokenized['validation'], batch_size=8, collate_fn=data_collator)`..." + Style.RESET_ALL)
+    eval_dataloader = DataLoader(tokenized["validation"], batch_size=8, collate_fn=data_collator)
 
-    use_accelerate = yes("Use 🤗 Accelerate for distributed / mixed-precision? (Y/N) ")
-    if use_accelerate:
-        try:
-            from accelerate import Accelerator
-        except ModuleNotFoundError:
-            print("Accelerate not installed; falling back to pure PyTorch.")
-            use_accelerate = False
+    #============ Batch Inspection Demo ============#
+    if yes("Do you want to inspect the first batch of the train dataloader? (Y/N) "):
+        print("Below codes can be used to inspect the first batch of a dataloader (i.e., whether there's any mistake in the process):")
+        print(Fore.BLUE + "for batch in train_dataloader:")
+        print("\tprint({k: v.shape for k, v in batch.items()})")
+        print("\tbreak")
+        print(Style.RESET_ALL)
+        for batch in train_dataloader:
+            print({k: v.shape for k, v in batch.items()})
+            break
 
-    # dataloaders ----------------------------------------------------
-    train_dl = DataLoader(bundle["tokenized"]["train"], shuffle=True,
-                          batch_size=8, collate_fn=bundle["data_collator"])
-    eval_dl = DataLoader(bundle["tokenized"]["validation"], batch_size=8,
-                         collate_fn=bundle["data_collator"])
+    # ==================== 4. Model Initialization ====================== #
+    from transformers import AutoModelForSequenceClassification
+    print("Model's initialization is the same as in the Trainer branch.")
+    print(Fore.BLUE + "Executing `model = AutoModelForSequenceClassification.from_pretrained(ckpt, num_labels=2)`..." + Style.RESET_ALL)
+    model = AutoModelForSequenceClassification.from_pretrained(ckpt, num_labels=2)
 
-    model = dynamic_import("AutoModelForSequenceClassification").from_pretrained(
-        bundle["checkpoint"], num_labels=bundle["num_labels"])
-
-    optimizer = torch.optim.AdamW(model.parameters(), lr=5e-5)
-
-    if use_accelerate:
-        accelerator = Accelerator()
-        model, optimizer, train_dl, eval_dl = accelerator.prepare(
-            model, optimizer, train_dl, eval_dl
-        )
-        device = accelerator.device
-    else:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        model.to(device)
-
-    num_epochs = int(input("Epochs (default 3): ").strip() or 3)
-    num_steps = num_epochs * len(train_dl)
-    lr_scheduler = get_scheduler(
-        "linear", optimizer=optimizer,
-        num_warmup_steps=0, num_training_steps=num_steps)
-
-    metric = evaluate.load("glue", "mrpc") if bundle["label_names"] else None
-
-    progress = tqdm(range(num_steps))
-    model.train()
-    for epoch in range(num_epochs):
-        for batch in train_dl:
-            batch = {k: v.to(device) for k, v in batch.items()}
+    #============ Model Inspection Demo ============#
+    if yes("Would you like to check whether the model is correctly initialized? (Y/N) "):
+        print("Below codes can be used to inspect it (with the first batch)")
+        print(Fore.BLUE + "for batch in train_dataloader:")
+        print("\toutputs = model(**batch)")
+        print("\tprint(outputs.loss, outputs.logits.shape)")
+        print("\tbreak")
+        print(Style.RESET_ALL)
+        for batch in train_dataloader:
             outputs = model(**batch)
-            loss = outputs.loss
-            if use_accelerate:
-                accelerator.backward(loss)
-            else:
-                loss.backward()
+            print(outputs.loss, outputs.logits.shape)
+            break
+    input("Press Enter to continue...")
 
-            optimizer.step()
-            lr_scheduler.step()
-            optimizer.zero_grad()
-            progress.update(1)
+    # ==================== 5. Hyperparameter Setup ====================== #
+    print("To achieve the same training efficiency as in the Trainer branch, we need to manually set up the optimizer and learning rate scheduler.")
+    print(Fore.GREEN + "1. Define the optimizer:" + Style.RESET_ALL)
+    print("Since the Trainer API utilizes AdamW optimizer with lr=5e-5, we will use it here as well.")
+    print(Fore.BLUE + "Executing `from torch.optim import AdamW`..." + Style.RESET_ALL)
+    print(Fore.BLUE + "Executing `optimizer = torch.optim.AdamW(model.parameters(), lr=5e-5)`..." + Style.RESET_ALL)
+    from torch.optim import AdamW
+    optimizer = AdamW(model.parameters(), lr=5e-5)
+    input("Press Enter to continue...")
 
-        # --- simple eval each epoch --------------------------------
-        model.eval()
-        metric.reset() if metric else None
+    #============ Optimizer Optimization Demo ============#
+    if yes("Would you like to improve the training efficiency even further? (Y/N) "):
+        print("Applying `weight_decay=0.01` to reduce overfitting and improve generalization.")
+        lr = float(input("Probably a different learning rate (default 5e-5): ").strip() or 5e-5)
+        print(Fore.BLUE + "Executing `optimizer = AdamW(model.parameters(), lr=lr, weight_decay=0.01)`..." + Style.RESET_ALL)
+        optimizer = AdamW(model.parameters(), lr=lr, weight_decay=0.01)
+    input("Press Enter to continue...")
+
+    print(Fore.GREEN + "2. Define the # of epochs:" + Style.RESET_ALL)
+    print("Since the Trainer API uses 3 epochs by default, we will use it here as well.")
+    print(Fore.BLUE + "Executing `num_epochs = 3`..." + Style.RESET_ALL)
+    num_epochs = 3
+    input("Press Enter to continue...")
+
+    print(Fore.GREEN + "3. Define the learning rate scheduler:" + Style.RESET_ALL)
+    print("The Trainer API uses a linear scheduler with a decay from the maximum value (5e-5) to 0...")
+    print("Where the number of training steps is the product of the # of epochs and the # of batches.")
+    print("To implement it, below codes can be used:")
+    print(Fore.BLUE + "from transformers import get_scheduler" + Style.RESET_ALL)
+    from transformers import get_scheduler
+    print(Fore.BLUE + "num_training_steps = num_epochs * len(train_dataloader)" + Style.RESET_ALL)
+    num_training_steps = num_epochs * len(train_dataloader)
+    print(f"The number of training steps is {num_training_steps}.")
+    print(Fore.BLUE + "lr_scheduler = get_scheduler('linear', optimizer=optimizer, num_warmup_steps=0, num_training_steps=num_training_steps)" + Style.RESET_ALL)
+    print("Executing...")
+    lr_scheduler = get_scheduler(
+        "linear",
+        optimizer=optimizer,
+        num_warmup_steps=0,
+        num_training_steps=num_training_steps,
+    )
+    input("Press Enter to continue...")
+
+    # ==================== 6. CPU to GPU ====================== #
+    print("Like for every PyTorch 'model', move the model to the GPU if available.")
+    print(Fore.BLUE + "Executing `device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')`..." + Style.RESET_ALL)
+    print(Fore.BLUE + "Executing `model.to(device)`..." + Style.RESET_ALL)
+    device = torch.accelerator.current_accelerator() if torch.accelerator.is_available() else torch.device('cpu')
+    model.to(device)
+    input("Press Enter to continue...")
+
+    # ==================== 7. Metrics Deployment ====================== #
+    print("Like in the Trainer branch, we can deploy the metrics with `evaluate.load`.")
+    print(Fore.BLUE + "Executing `import evaluate`..." + Style.RESET_ALL)
+    import evaluate
+    print(Fore.BLUE + "Executing `metric = evaluate.load('glue', 'mrpc')`..." + Style.RESET_ALL)
+    metric = evaluate.load("glue", "mrpc")
+    print("Do recall that the `metric` is used to compute the metrics during evaluation, "
+          "and the `compute_metrics` function is used to process the predictions and labels.")
+    print("Also, do recall where the available metrics can be found.")
+    input("Press Enter to continue...")
+
+    # ==================== 8. Training ====================== #
+    print("Now we can start the training loop.")
+    print(Fore.BLUE + "Executing `from tqdm.auto import tqdm`..." + Style.RESET_ALL)
+    from tqdm.auto import tqdm
+    print(Fore.BLUE + "Executing `progress_bar = tqdm(range(num_training_steps))`..." + Style.RESET_ALL)
+    progress_bar = tqdm(range(num_training_steps))
+    print(Fore.BLUE + "Executing `model.train()`..." + Style.RESET_ALL)
+    model.train() # set the model to training mode
+    if yes("Do you recall what `model.train()` is for? (Y/N) "):
+        pass
+    else:
+        print(Fore.GREEN + "`model.train()` is used to set the model to training mode." + Style.RESET_ALL)
+    input("Press Enter to continue...")
+    print(Fore.BLUE + "Executing for epoch in range(num_epochs):" + Style.RESET_ALL)
+    print(Fore.BLUE + "\tfor batch in train_dataloader:" + Style.RESET_ALL)
+    print(Fore.BLUE + "\t\tbatch = {k: v.to(device) for k, v in batch.items()} # move the batch to GPU" + Style.RESET_ALL)
+    print(Fore.BLUE + "\t\toutputs = model(**batch)" + Style.RESET_ALL)
+    print(Fore.BLUE + "\t\tloss = outputs.loss # without the logits" + Style.RESET_ALL)
+    print(Fore.BLUE + "\t\tloss.backward() # compute gradients for those parameters that have `requires_grad=True`" + Style.RESET_ALL)
+    print(Fore.BLUE + "\t\toptimizer.step() # update the model parameters" + Style.RESET_ALL)
+    print(Fore.BLUE + "\t\tlr_scheduler.step() # update the learning rate" + Style.RESET_ALL)
+    print(Fore.BLUE + "\t\toptimizer.zero_grad() # reset the gradients to zero to prevent gradient accumulation " + Style.RESET_ALL)
+    print(Fore.BLUE + "\t\tprogress_bar.update(1)" + Style.RESET_ALL)
+    if yes("Are you familiar with each line of the above codes? (Y/N) "):
+        print("Great!")
+    else:
+        print("Take a look at the comments in the above codes to understand each line!")
+    #============ Training Optimization Demo ============#
+    if yes("Would you like to see some optimization tips for the training loop? (Y/N) "):
+        print("1. Gradient Clipping: Add `torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)` before `optimizer.step()`.")
+        print("2. Use `torch.cuda.amp.autocast()` and `GradScaler` for faster training.")
+        print("3. Gradient Accumulation: Accumulate gradients over multiple batches to simulate larger batch sizes.")
+        print("4. Checkpointing: Save model checkpoints periodically to resume training if interrupted.")
+    input("Press Enter to continue...")
+    print("Since the evaluation is done at the end of each epoch...")
+    print(Fore.BLUE + "Executing `model.eval() # set the model to evaluation mode`..." + Style.RESET_ALL)
+    print(Fore.BLUE + "# Disable gradient computations to save memory and computation" + Style.RESET_ALL)
+    print(Fore.BLUE + "Executing `with torch.no_grad():`..." + Style.RESET_ALL)
+    print(Fore.BLUE + "\tfor batch in eval_dataloader:" + Style.RESET_ALL)
+    print(Fore.BLUE + "\t\tbatch = {k: v.to(device) for k, v in batch.items()}" + Style.RESET_ALL)
+    print(Fore.BLUE + "\t\toutputs = model(**batch)" + Style.RESET_ALL)
+    print(Fore.BLUE + "\t\tlogits = outputs.logits # get the logits for comparing with the labels" + Style.RESET_ALL)
+    print(Fore.BLUE + "\t\tpreds = torch.argmax(logits, dim=-1) # get the index of the maximum value among each sample's logits" + Style.RESET_ALL)
+    print(Fore.BLUE + "\t\t# Use `add_batch` to accumulate the batch-level metrics for the overall metrics at the end of the epoch" + Style.RESET_ALL)
+    print(Fore.BLUE + "\t\tmetric.add_batch(predictions=preds, references=batch['labels'])" + Style.RESET_ALL)
+    print(Fore.BLUE + "\tmetric.compute() # Compute the metrics for the current epoch" + Style.RESET_ALL)
+    print(Fore.BLUE + "Executing `model.train()`..." + Style.RESET_ALL)
+    if yes("Are you familiar with each line of the above codes? (Y/N) "):
+        print("Fantastic!")
+    else:
+        print("Take a look at the comments in the above codes to understand each line!")
+    input("Press Enter to execute the training loop at once...")
+    # One epoch at a time
+    for epoch in range(num_epochs):
+        # One batch at a time
+        for batch in train_dataloader:
+            batch = {k: v.to(device) for k, v in batch.items()} # move the batch to GPU
+            outputs = model(**batch)
+            loss = outputs.loss # without the logits
+            loss.backward() # compute gradients for those parameters that have `requires_grad=True`
+
+            optimizer.step() # update the model parameters
+            lr_scheduler.step() # update the learning rate
+            optimizer.zero_grad() # reset the gradients to zero to prevent gradient accumulation
+            progress_bar.update(1)
+
+        # ==================== 9. Evaluation ====================== #
+        model.eval() # set the model to evaluation mode
+        # Disable gradient computations to save memory and computation
         with torch.no_grad():
-            for batch in eval_dl:
+            for batch in eval_dataloader:
                 batch = {k: v.to(device) for k, v in batch.items()}
                 outputs = model(**batch)
-                if metric:
-                    preds = torch.argmax(outputs.logits, dim=-1)
-                    metric.add_batch(predictions=preds,
-                                     references=batch["labels"])
-        if metric:
-            print(f"\n🔎 Epoch {epoch+1}: {metric.compute()}")
+                
+                logits = outputs.logits # get the logits for comparing with the labels
+                preds = torch.argmax(logits, dim=-1) # get the index of the maximum value among each sample's logits
+                # Use `add_batch` to accumulate the batch-level metrics for the overall metrics at the end of the epoch
+                metric.add_batch(predictions=preds, references=batch["labels"])
+            metric.compute() # Compute the metrics for the current epoch
         model.train()
 
-    if yes("Save final checkpoint? (Y/N) "):
-        path = input("Directory (default ./finetuned): ").strip() or "./finetuned"
-        if use_accelerate:
-            accelerator.wait_for_everyone()
-            unwrapped = accelerator.unwrap_model(model)
-            save_to_dir(unwrapped, bundle["tokenizer"], path)
-        else:
-            save_to_dir(model, bundle["tokenizer"], path)
+    # if yes("Save final checkpoint? (Y/N) "):
+    #     path = input("Directory (default ./finetuned): ").strip() or "./finetuned"
+    #     if use_accelerate:
+    #         accelerator.wait_for_everyone()
+    #         unwrapped = accelerator.unwrap_model(model)
+    #         save_to_dir(unwrapped, bundle["tokenizer"], path)
+    #     else:
+    #         save_to_dir(model, bundle["tokenizer"], path)
 
-    print("🏁 Training finished.  "
-          "Plot the logged losses in W&B or another tool to inspect "
-          "learning curves (cf. 3_4.txt).")
+    # print("🏁 Training finished.  "
+    #       "Plot the logged losses in W&B or another tool to inspect "
+    #       "learning curves (cf. 3_4.txt).")
 
 
 # ------------------------------- main ------------------------------ #
