@@ -239,7 +239,7 @@ def pipeline_mode():
             prompts.append(input("Prompt: "))
         else:
             contents.append(input("Content (file path / url): "))
-        if not yes("More than one request? (Y/N) "):
+        if not yes("More request? (Y/N) "):
             break
 
     model_ckpt = input("Pipeline model's checkpoint (leave blank for default): ").strip() or None
