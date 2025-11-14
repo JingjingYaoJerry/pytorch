@@ -51,24 +51,52 @@ def save_to_dir(model, tokenizer, directory: str) -> None:
     print(f"✓ Saved model{' & tokenizer' if tokenizer else ''} to {directory}")
 
 
+def print_code(code: str) -> None:
+    """Print code with syntax highlighting."""
+    print(Fore.BLUE + code + Style.RESET_ALL)
+
+
+def highlight(text: str) -> str:
+    """Highlight text with color."""
+    return Fore.GREEN + text + Style.RESET_ALL
+
+
+# ---------------------- Datasets --------------------------- #
+def load():
+    """
+    Load a dataset
+
+    Returns
+    -------
+    Dataset or DatasetDict or IterableDataset or IterableDatasetDict
+        The dataset loaded with `datasets.load_dataset()`.
+    """
+    from datasets import load_dataset
+    print("As demonstrated in the tutorial, a MRPC DatasetDict from the GLUE benchmark can be downloaded with:")
+    print_code("raw_datasets = load_dataset('glue', 'mrpc')")
+    highlight("Where the first parameter `path`'s argument can be a dataset on the HF Hub.")
+    print("But upon checking, it appears to be a legacy method based on its latest documentation and `load_dataset`'s documentation:")
+    print("https://huggingface.co/datasets/nyu-mll/glue?library=datasets")
+    print("https://huggingface.co/docs/datasets/v1.13.2/package_reference/loading_methods.html#datasets.load_dataset")
+    print("OR...")
+    highlight("In addition to arguments of local datasets (e.g., './dataset/squad' or './dataset/squad/squad.py')...")
+    highlight("According to the same doc., if an argument of a 'generic dataset' is passed (e.g., csv, json, etc.), a generic dataset builder will be returned by `load_dataset`.")
+    input("Press enter to load the dataset using" + Fore.BLUE + "ds = load_dataset('nyu-mll/glue', 'mrpc')" + Style.RESET_ALL + " ...")
+    raw_datasets = load_dataset("nyu-mll/glue", "mrpc")
+    highlight(f"By default the dataset is going to be downloaded to {pathlib.Path.home() / '.cache' / 'huggingface' / 'datasets'}")
+    highlight("To change the cache directory, set the environment variable `HF_HOME`.")
+
+    return raw_datasets
+    
 # ---------------------- Trainer Branch --------------------------- #
 def Trainer():
     """
     Fine-tune a model with `transformers.Trainer`.
     """
-    from datasets import load_dataset
     from transformers import AutoTokenizer
 
     # ==================== 1. Load Dataset ====================== #
-    print("As demonstrated in the tutorial, a MRPC DatasetDict from the GLUE benchmark can be downloaded with:")
-    print("raw_datasets = load_dataset('glue', 'mrpc')")
-    print("But upon checking, it appears to be a legacy method based on its latest documentation and `load_dataset`'s documentation:")
-    print("https://huggingface.co/datasets/nyu-mll/glue?library=datasets")
-    print("https://huggingface.co/docs/datasets/v1.13.2/package_reference/loading_methods.html#datasets.load_dataset")
-    input("Press enter to load the dataset using `ds = load_dataset('nyu-mll/glue', 'mrpc')` ...")
-    raw_datasets = load_dataset("nyu-mll/glue", "mrpc")
-    print(f"By default the dataset is going to be downloaded to {pathlib.Path.home() / '.cache' / 'huggingface' / 'datasets'}")
-    print("To change the cache directory, set the environment variable `HF_HOME`.")
+    raw_datasets = load()
     input("Press Enter to continue...")
 
     # ==================== 2. Split Dataset ====================== #

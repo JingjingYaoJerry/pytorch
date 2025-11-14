@@ -1,28 +1,12 @@
-# preprocess_strict.py
-# =============================================================
-# Usage (import):
-#     from preprocess_strict import preprocess
-#     clean_df = preprocess("data.csv")
-#
-# What it does
-# ------------
-# 1. 100 % 按照 `preprocessing_template.py` 中**逐条列出的异常场景**
-#    • 重复行、缺失、高缺失率、负值、离群、货币字符串、混合字串数字、
-#      URL 前缀、正负无穷… 共 9 类
-# 2. 每发现 1 条异常 → 弹出 Tkinter 窗口：
-#      ┌────────────────────────────┐
-#      │ 可视化整行数据（含列名）      │
-#      │ Hint : 为什么异常            │
-#      │ Solution : 来自模板的建议     │
-#      │  [Replace] [Leave Unchanged] │
-#      └────────────────────────────┘
-#    Replace   → 用建议值修改后进入下一条
-#    Leave …   → 保持原样进入下一条
-# 3. 全程**不自动删除/修改**，一切由用户点击确认
-#
-# Soft-deps : pandas  numpy  (可选) transformers  torch
-# Std-lib  : csv  os  re  tkinter
-# =============================================================
+"""
+preprocessing_GUI.py (under development)
+by Jingjing YAO (Jerry)
+
+An issue-level, GUI-driven inspector that scans a CSV for many specific 
+anomaly types and lets you accept/reject suggested fixes one issue at a time 
+(Tkinter GUI).
+"""
+
 from __future__ import annotations
 import os, csv, re, sys, tkinter as tk
 from tkinter import ttk, messagebox

@@ -1,28 +1,23 @@
-#!/usr/bin/env python3
-# preprocessing_review.py
-# ==========================================================
-# Interactive data-cleaning sandbox that walks through every
-# transformation listed in *preprocessing_template.py*.
-#
-# Design principles borrowed from `huggingface_1.py`:
-#   • menu-driven, step-by-step → easy to review each concept
-#   • small helper utilities (`yes`, safety checks)
-#   • optional branches so the learner can skip parts
-#
-# Author: YOU
-# ==========================================================
+"""
+preprocessing_CLI.py
+by Jingjing YAO (Jerry)
+
+Interactive data-cleaning sandbox that walks through every
+transformation listed in *preprocessing_template.py*.
+
+Design principles borrowed from `huggingface_1.py`:
+    • menu-driven, step-by-step → easy to review each concept
+    • small helper utilities (`yes`, safety checks)
+    • optional branches so the learner can skip parts
+"""
 
 import csv
-import os
-import sys
 from pathlib import Path
-from typing import List, Set, Tuple
+from typing import Set
 
 import numpy as np
 import pandas as pd
-from sklearn.experimental import enable_iterative_imputer  # noqa: F401
 from sklearn.impute import IterativeImputer
-from tqdm.auto import tqdm
 
 
 # ----------------------------- helpers ----------------------------- #
@@ -233,7 +228,7 @@ def split_column(df: pd.DataFrame) -> pd.DataFrame:
 
 # ------------------------------- main ------------------------------ #
 def main() -> None:
-    print("=== Data-preprocessing Review CLI ===")
+    print("=== Data-Preprocessing CLI ===")
     path = Path(safe_input("CSV/TSV file path: "))
     df = robust_read(path)
     basic_overview(df)
@@ -263,7 +258,7 @@ def main() -> None:
         df.to_csv(out, index=False)
         print(f"✓ Saved to {out}")
 
-    print("👋  Done. Goodbye!")
+    print("Done. Goodbye!")
 
 
 if __name__ == "__main__":
