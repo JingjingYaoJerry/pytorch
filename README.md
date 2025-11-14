@@ -1,17 +1,20 @@
-## PyTorch & Hugging Face & Pre-Processing
+## AI Engineering Playground
+A 
 
 [![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-compatible-red.svg)](https://pytorch.org/)
 [![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Transformers-yellow.svg)](https://huggingface.co/transformers/)
 [![Made-with-Love](https://img.shields.io/badge/Made%20with-❤️-ff69b4.svg)](https://www.linkedin.com/in/%E4%BA%AC%E6%99%B6-%E5%A7%9A-9997b5180/)
 
-This repository is a collection of small, focused example scripts and utilities for learning and prototyping in machine learning, data preprocessing, and Hugging Face workflows. The codebase includes:
+This repository is a collection of small, practical examples / scripts covering PyTorch training, model evaluation, HuggingFace workflows, and data preprocessing utilities for learning and reviewing. The codebase includes:
 
 - A LeNet-style CNN example and CIFAR-10 demo (`cnn.py`).
 - Several interactive Hugging Face/Transformers helper scripts that demonstrate pipelines, tokenizer+model flows, and Trainer/custom training loops based on the official tutorial docs.
 - Data preprocessing utilities and interactive/GUI cleaners (`preprocessing_template.py`, `preprocessing_CLI.py`, `preprocessing_GUI.py`, `preprocess_strict.py`-style implementations).
 
-The intent is educational and self-review: show runnable examples, explain common workflows (data → model → evaluation), and provide small building blocks for experiments or reflections.
+This repository serves as a personal sandbox for exploring AI engineering fundamentals — 
+including model training, inference workflows, data pipelines, and practical implementation 
+of PyTorch and Hugging Face tools.
 
 ---
 
@@ -31,6 +34,16 @@ Hugging Face / NLP / Transformers
 Data Preprocessing
 
 * `preprocessing_template.py`, `preprocessing_CLI.py`, and `preprocessing_GUI.py` — examples/steps of data-preprocessing, and interactive CLI/Tkinter-based flows for manual inspection and guided fixes.
+
+---
+
+### Why This Repository Matters
+These examples collectively reflect practical familiarity with:
+- Building and training neural networks in PyTorch (CNN on CIFAR-10)
+- Understanding core ML workflows (data loaders, transforms, evaluation loops)
+- Applying Hugging Face tools for tokenization, inference, and trainer-based experiments, etc.
+- Designing small utilities (CLI / GUI) to inspect and preprocess datasets
+- Experimenting with real-world workflows used in AI prototyping and model debugging
 
 ---
 
